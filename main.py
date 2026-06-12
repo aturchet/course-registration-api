@@ -3,6 +3,8 @@ from fastapi.responses import JSONResponse
 from bs4 import BeautifulSoup
 from typing import List
 import re
+import uvicorn
+import os
 
 app = FastAPI(title="University Catalog Ingestion API (No Pydantic)", version="1.0.0")
 
@@ -140,3 +142,16 @@ async def get_course(course_code: str):
         
     # Return standard dictionary; FastAPI transforms this directly to JSON serialization
     return COURSE_DB[lookup_key]
+
+if __name__ == "__main__":
+    # Fetch the PORT environment variable. 
+    # Fallback to 8000 if it isn't set, and cast to an integer.
+    port = int(os.getenv("PORT", 8000))
+    
+    # Run the FastAPI app using Uvicorn
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0",  # Use 0.0.0.0 so it binds to all interfaces (crucial for Docker/Cloud)
+        port=port, 
+        reload=True      # Remember to set reload=False in actual production!
+    )
