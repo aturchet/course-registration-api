@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from bs4 import BeautifulSoup
 from typing import List
 import re
@@ -580,4 +579,3 @@ if __name__ == "__main__":
     
     # Run the FastAPI app using Uvicorn
     uvicorn.run("main:app",host="0.0.0.0", port=port,reload=False)
->>>>>>> 9be34ff (phase 2 changes)
