@@ -3,7 +3,8 @@ from typing import List
 import re
 import uvicorn
 import os
-from typing import List, Dict, Optional, Set, Tuple
+from typing import List, Dict, Optional, Tuple
+from typing_extensions import Literal
 from fastapi import FastAPI, UploadFile, File, HTTPException, status
 from pydantic import BaseModel
 
