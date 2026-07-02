@@ -1,0 +1,66 @@
+name: Backend CI/CD Quality Gate
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install app dependencies
+        pip install -r requirements.txt
+        # Install CI/testing dependencies
+        pip install pytest pytest-cov flake8 black httpx
+
+    # Code formati & Linting
+    - name: Enforce Code Formatting with Black
+      run: |
+        # Fails the build if any files would be modified by Black
+        black --check .
+
+    - name: Lint with Flake8
+      run: |
+        # Stop the build if there are syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Treat all other issues as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+
+    # Unit Test
+    - name: Run Unit Tests with Code Coverage
+      run: |
+        # Runs tests (assuming they are in a folder named 'tests/unit') 
+        # and outputs a terminal coverage report missing lines
+        pytest --cov=main --cov-report=term-missing tests/
+
+    # API integration
+    - name: Boot API and Run Integration Tests
+      env:
+        PORT: 8000
+      run: |
+        # Boot the FastAPI server in the background using '&'
+        uvicorn main:app --host 0.0.0.0 --port $PORT &
+        
+        # Give the server a few seconds
+        sleep 3 
+        
+        #Ping the server to ensure its alive
+        curl -f http://127.0.0.1:$PORT/docs || exit 1
+        
+        # Run integration tests from 'tests/integration'
+        pytest tests/

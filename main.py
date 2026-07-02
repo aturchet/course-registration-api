@@ -3,11 +3,11 @@ from typing import List
 import re
 import uvicorn
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set, Tuple
 from fastapi import FastAPI, UploadFile, File, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-app = FastAPI(title="Course Registration API", version="2.0.0")
+app = FastAPI(title="Course Registration API", version="3.0.0")
 
 # IN-MEMORY DATA STORES
 catalog_db: Dict[str, dict] = {}
@@ -45,6 +45,28 @@ class StudentProfile(BaseModel):
     plan: List[PlanRecord]
 
 
+class CourseError(BaseModel):
+    course_code: str
+    type: str
+    message: str
+
+class TermValidation(BaseModel):
+    term: str
+    errors: List[CourseError]
+
+class CreditSummary(BaseModel):
+    total_earned: int
+    total_planned: int
+    total_remaining_for_graduation: int
+
+class AuditReport(BaseModel):
+    student_id: str
+    status: Literal["ok", "warning", "failed"]
+    timeline_validation: List[TermValidation]
+    cross_list_violations: List[CourseError]
+    credit_summary: CreditSummary
+
+
 # UTILITY PARSING FUNCTIONS
 def normalize_course(code: str) -> str:
     """Removes all whitespace and non-alphanumeric characters, returning uppercase."""
@@ -74,6 +96,26 @@ def check_student_exists(student_id: str):
             detail="Student not found. Must perform history import first."
         )
 
+def term_sort_key(term: str) -> Tuple[int, int]:
+    """
+    Parses a term string like '24F' or '26SP' into a sortable tuple: (year, season_rank).
+    Season order: W (1) < SP (2) < S (3) < F (4).
+    """
+    match = re.match(r'^(\d{2})(W|SP|S|F)$', term.strip().upper())
+    if not match:
+        return (99, 99)
+        
+    year = int(match.group(1))
+    season_str = match.group(2)
+    
+    season_ranks = {"W": 1, "SP": 2, "S": 3, "F": 4}
+    return (year, season_ranks[season_str])
+
+def parse_prerequisites(prereq_string: str) -> List[str]:
+    """Parses a comma-separated prerequisite string into normalized course codes."""
+    if not prereq_string:
+        return []
+    return [normalize_course(code) for code in prereq_string.split(',')]
 
 # COURSE ENDPOINTS
 @app.post("/api/v1/admin/catalog/import", status_code=status.HTTP_201_CREATED, summary="Import university courses from an HTML table file")
@@ -216,8 +258,7 @@ async def import_student_history(student_id: str, file: UploadFile = File(...)):
     students_db[student_id]["history"] = records
     
     return {
-        "status": "success", 
-        "past_courses_imported": len(records)
+        "status": "success", "past_courses_imported": len(records)
     }
 
 @app.put("/api/v1/students/{student_id}/history")
@@ -279,6 +320,143 @@ async def get_student_profile(student_id: str):
         "plan": students_db[student_id]["plan"]
     }
 
+
+# AUDIT ENDPOINT
+@app.get("/api/v1/students/{student_id}/audit-report", response_model=AuditReport)
+async def generate_audit_report(student_id: str, strict: bool = False):
+    check_student_exists(student_id)
+    student = students_db[student_id]
+    
+    # Sort history and plan chronologically using the custom key
+    history = sorted(student.get("history", []), key=lambda x: term_sort_key(x.get("term", "")))
+    plan = sorted(student.get("plan", []), key=lambda x: term_sort_key(x.get("term", "")))
+    
+    completed_terms: Dict[str, str] = {}
+    earned_credits_map: Dict[str, int] = {}
+    
+    # New structures for the updated schema
+    timeline_errors_by_term: Dict[str, List[dict]] = {}
+    cross_list_violations: List[dict] = []
+
+    def add_timeline_error(term: str, code: str, err_type: str, msg: str):
+        if term not in timeline_errors_by_term:
+            timeline_errors_by_term[term] = []
+        timeline_errors_by_term[term].append({
+            "course_code": code,
+            "type": err_type,
+            "message": msg
+        })
+
+    # process historyy
+    for record in history:
+        course_code = normalize_course(record["course_code"])
+        term = record["term"]
+        record_status = record["status"].lower()
+        original_code = record["course_code"] # Preserve original casing/hyphens for output
+        
+        catalog_entry = catalog_db.get(course_code, {})
+        cross_listed_with = normalize_course(catalog_entry.get("cross_listed", ""))
+
+        if record_status == "completed":
+            if cross_listed_with and cross_listed_with in completed_terms:
+                continue
+            
+            completed_terms[course_code] = term
+            earned_credits_map[course_code] = record.get("credits_earned", 0)
+        else:
+            if course_code not in completed_terms:
+                earned_credits_map[course_code] = 0
+
+    total_earned = sum(earned_credits_map.values())
+    total_planned = 0
+
+    # plan
+    for record in plan:
+        course_code = normalize_course(record["course_code"])
+        term_planned = record["term"]
+        original_code = record["course_code"] # Preserve original casing/hyphens for output
+        
+        # Deduplication/Retake Check
+        if course_code in completed_terms:
+            add_timeline_error(
+                term=term_planned, 
+                code=original_code, 
+                err_type="DUPLICATE_COURSE", 
+                msg="Course is already completed."
+            )
+            continue
+            
+        catalog_entry = catalog_db.get(course_code)
+        if not catalog_entry:
+            add_timeline_error(
+                term=term_planned, 
+                code=original_code, 
+                err_type="UNKNOWN_COURSE", 
+                msg="Course is unknown in catalog."
+            )
+            continue
+            
+        # Cross-listing Check
+        cross_listed_with = normalize_course(catalog_entry.get("cross_listed", ""))
+        if cross_listed_with and cross_listed_with in completed_terms:
+            original_cross = catalog_entry.get("cross_listed", cross_listed_with)
+            cross_list_violations.append({
+                "course_code": original_code,
+                "type": "CROSS_LIST_CONFLICT",
+                "message": f"Cross-listed with completed course {original_cross}"
+            })
+            continue
+
+        # Prerequisite Evaluation
+        reqs = parse_prerequisites(catalog_entry.get("prerequisites", ""))
+        missing_reqs = []
+        for req in reqs:
+            if req not in completed_terms:
+                missing_reqs.append(req)
+            else:
+                req_term = completed_terms[req]
+                if term_sort_key(req_term) >= term_sort_key(term_planned):
+                    missing_reqs.append(req)
+
+        if missing_reqs:
+            add_timeline_error(
+                term=term_planned, 
+                code=original_code, 
+                err_type="MISSING_PREREQUISITE", 
+                msg=f"Missing prerequisite: {', '.join(missing_reqs)}"
+            )
+
+        total_planned += catalog_entry.get("credits", 0)
+        completed_terms[course_code] = term_planned
+
+    # determine path to graduation
+    total_remaining_for_graduation = max(0, 120 - total_earned - total_planned)
+    
+    # Format the timeline errors into the List[TermValidation] structure
+    timeline_validation = [
+        {"term": term, "errors": errs} 
+        for term, errs in timeline_errors_by_term.items()
+    ]
+    
+    has_issues = len(timeline_validation) > 0 or len(cross_list_violations) > 0
+    
+    # Evaluate strict parameter
+    if has_issues:
+        final_status = "failed" if strict else "warning"
+    else:
+        final_status = "ok"
+
+    return {
+        "student_id": student_id,
+        "status": final_status,
+        "timeline_validation": timeline_validation,
+        "cross_list_violations": cross_list_violations,
+        "credit_summary": {
+            "total_earned": total_earned,
+            "total_planned": total_planned,
+            "total_remaining_for_graduation": total_remaining_for_graduation
+        }
+    }
 
 # ENTRY POINT
 if __name__ == "__main__":
