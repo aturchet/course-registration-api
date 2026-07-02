@@ -44,7 +44,7 @@ jobs:
     # Unit Test
     - name: Run Unit Tests with Code Coverage
       run: |
-        # Runs tests (assuming they are in a folder named 'tests/unit') 
+        # Runs tests (assuming they are in a folder named 'tests/') 
         # and outputs a terminal coverage report missing lines
         pytest --cov=main --cov-report=term-missing tests/
 
@@ -62,5 +62,5 @@ jobs:
         #Ping the server to ensure its alive
         curl -f http://127.0.0.1:$PORT/docs || exit 1
         
-        # Run integration tests from 'tests/integration'
+        # Run integration tests from 'tests/'
         pytest tests/
