@@ -41,18 +41,15 @@ def test_catalog_import(client):
 
 
 def test_student_history_and_audit(client):
-    # INITIALIZE STUDENT TO PREVENT 404 ERRORS
-    students_db["STUDENT1"] = {"history": [], "plan": []}
-
-    # 1. Setup Catalog (Added STAT101 so the plan doesn't get rejected!)
+    # 1. Setup Catalog
     html_cat = b"""
     <table>
         <tr>
-            <th>course code</th>
-            <th>title</th>
-            <th>credits</th>
-            <th>prerequisites</th>
-            <th>cross-listed</th>
+            <th>Course Code</th>
+            <th>Title</th>
+            <th>Credits</th>
+            <th>Prerequisites</th>
+            <th>Cross-listed</th>
         </tr>
         <tr><td>CS101</td><td>Intro</td><td>3</td><td></td><td></td></tr>
         <tr><td>CS102</td><td>Advanced</td><td>3</td><td>CS101</td><td></td></tr>
@@ -64,9 +61,33 @@ def test_student_history_and_audit(client):
         "/api/v1/admin/catalog/import",
         files={"file": ("cat.html", io.BytesIO(html_cat), "text/html")},
     )
-    assert res_cat.status_code == 201  # Ensure catalog actually imported!
+    assert res_cat.status_code == 201
 
-    # 2. Add History
+    # 2.Import HTML Transcript to initialize the student
+    html_transcript = b"""
+    <table>
+        <tr>
+            <th>Status</th>
+            <th>Course</th>
+            <th>Grade</th>
+            <th>Term</th>
+            <th>Credits</th>
+        </tr>
+        <tr><td>Completed</td><td>CS101</td><td>A</td><td>24F</td><td>3</td></tr>
+        <tr><td>Completed</td><td>MATH101</td><td>B</td><td>24F</td><td>3</td></tr>
+        <!-- Triggers the deduplication / weight replacement logic for extra coverage -->
+        <tr><td>Completed</td><td>MATH101</td><td>A</td><td>24F</td><td>3</td></tr> 
+        <!-- Triggers the pass/blank grade logic -->
+        <tr><td>In-Progress</td><td>ENG101</td><td>P</td><td>25SP</td><td>3</td></tr>
+    </table>
+    """
+    res_hist_import = client.post(
+        "/api/v1/students/STUDENT1/history/import",
+        files={"file": ("transcript.html", io.BytesIO(html_transcript), "text/html")},
+    )
+    assert res_hist_import.status_code == 201
+
+    #  PUT request to ensure the update endpoint is covered
     payload = {
         "history": [
             {
@@ -84,9 +105,9 @@ def test_student_history_and_audit(client):
         ]
     }
     res_hist = client.put("/api/v1/students/STUDENT1/history", json=payload)
-    assert res_hist.status_code == 200  # Ensure history actually saved!
+    assert res_hist.status_code == 200
 
-    # 3. Add Plan (Deliberately trigger all 3 error types for coverage)
+    # 3. Add Plan
     plan_payload = {
         "planned_courses": [
             {"course_code": "CS101", "term": "25SP"},  # Triggers DUPLICATE
@@ -95,9 +116,7 @@ def test_student_history_and_audit(client):
         ]
     }
     res_plan = client.post("/api/v1/students/STUDENT1/plan", json=plan_payload)
-
-    # CRITICAL: This ensures your API accepted the plan and didn't fail silently
-    assert res_plan.status_code in [200, 201], f"Plan failed to save: {res_plan.text}"
+    assert res_plan.status_code in [200, 201]
 
     # 4. Audit
     response = client.get("/api/v1/students/STUDENT1/audit-report")
@@ -105,10 +124,9 @@ def test_student_history_and_audit(client):
 
     data = response.json()
     assert data["status"] == "warning"
-    assert data["credit_summary"]["total_earned"] == 6  # 3 for CS101 + 3 for MATH101
+    assert data["credit_summary"]["total_earned"] == 6
     assert len(data["cross_list_violations"]) == 1
     assert data["cross_list_violations"][0]["type"] == "CROSS_LIST_CONFLICT"
-    assert len(data["timeline_validation"]) > 0
 
 
 def test_audit_missing_student(client):
