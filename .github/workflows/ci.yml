@@ -42,11 +42,11 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
     # Unit Test
-    - name: Run Unit Tests with Code Coverage
+    - name: Run Unit Tests
       run: |
-        # Runs tests (assuming they are in a folder named 'tests/') 
+        # Runs tests (assuming they are in a folder named 'tests/unit') 
         # and outputs a terminal coverage report missing lines
-        pytest --cov=main --cov-report=term-missing tests/
+        pytest --cov=main --cov-report=term-missing --cov-fail-under=80 tests/unit/
 
     # API integration
     - name: Boot API and Run Integration Tests
@@ -62,5 +62,5 @@ jobs:
         #Ping the server to ensure its alive
         curl -f http://127.0.0.1:$PORT/docs || exit 1
         
-        # Run integration tests from 'tests/'
-        pytest tests/
+        # Run integration tests from 'tests/integration'
+        pytest tests/integration/
