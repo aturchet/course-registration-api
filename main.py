@@ -453,7 +453,7 @@ async def generate_audit_report(student_id: str, strict: bool = False):
                 msg="Course is unknown in catalog.",
             )
             continue
-            
+
         # 2. Add credits before checks
         total_planned += catalog_entry.get("credits", 0)
 
