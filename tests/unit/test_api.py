@@ -44,28 +44,29 @@ def test_student_history_and_audit(client):
     # INITIALIZE STUDENT TO PREVENT 404 ERRORS
     students_db["STUDENT1"] = {"history": [], "plan": []}
 
-    # 1. Setup Catalog (MUST include Prereqs and Cross-listed columns)
-    # 1. Setup Catalog (Must include Title, Credits, Prereqs, and Cross-listed!)
+    # 1. Setup Catalog (Added STAT101 so the plan doesn't get rejected!)
     html_cat = b"""
     <table>
         <tr>
-            <th>Course Code</th>
-            <th>Title</th>
-            <th>Credits</th>
-            <th>Prerequisites</th>
-            <th>Cross-listed</th>
+            <th>course code</th>
+            <th>title</th>
+            <th>credits</th>
+            <th>prerequisites</th>
+            <th>cross-listed</th>
         </tr>
         <tr><td>CS101</td><td>Intro</td><td>3</td><td></td><td></td></tr>
         <tr><td>CS102</td><td>Advanced</td><td>3</td><td>CS101</td><td></td></tr>
         <tr><td>MATH101</td><td>Math</td><td>3</td><td></td><td>STAT101</td></tr>
+        <tr><td>STAT101</td><td>Stats</td><td>3</td><td></td><td>MATH101</td></tr>
     </table>
     """
-    client.post(
+    res_cat = client.post(
         "/api/v1/admin/catalog/import",
         files={"file": ("cat.html", io.BytesIO(html_cat), "text/html")},
     )
+    assert res_cat.status_code == 201  # Ensure catalog actually imported!
 
-    # 2. Add History (Take MATH101 so we can trigger a conflict later)
+    # 2. Add History
     payload = {
         "history": [
             {
@@ -82,23 +83,21 @@ def test_student_history_and_audit(client):
             },
         ]
     }
-    client.put("/api/v1/students/STUDENT1/history", json=payload)
+    res_hist = client.put("/api/v1/students/STUDENT1/history", json=payload)
+    assert res_hist.status_code == 200  # Ensure history actually saved!
 
     # 3. Add Plan (Deliberately trigger all 3 error types for coverage)
     plan_payload = {
         "planned_courses": [
             {"course_code": "CS101", "term": "25SP"},  # Triggers DUPLICATE
-            {
-                "course_code": "CS102",
-                "term": "24F",
-            },  # Triggers PREREQUISITE (taking same term as prereq)
-            {
-                "course_code": "STAT101",
-                "term": "25SP",
-            },  # Triggers CROSS-LIST (already took MATH101)
+            {"course_code": "CS102", "term": "24F"},  # Triggers PREREQUISITE
+            {"course_code": "STAT101", "term": "25SP"},  # Triggers CROSS-LIST
         ]
     }
-    client.post("/api/v1/students/STUDENT1/plan", json=plan_payload)
+    res_plan = client.post("/api/v1/students/STUDENT1/plan", json=plan_payload)
+
+    # CRITICAL: This ensures your API accepted the plan and didn't fail silently
+    assert res_plan.status_code in [200, 201], f"Plan failed to save: {res_plan.text}"
 
     # 4. Audit
     response = client.get("/api/v1/students/STUDENT1/audit-report")
