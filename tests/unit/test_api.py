@@ -45,12 +45,19 @@ def test_student_history_and_audit(client):
     students_db["STUDENT1"] = {"history": [], "plan": []}
 
     # 1. Setup Catalog (MUST include Prereqs and Cross-listed columns)
+    # 1. Setup Catalog (Must include Title, Credits, Prereqs, and Cross-listed!)
     html_cat = b"""
     <table>
-        <tr><th>Course Code</th><th>Credits</th><th>Prerequisites</th><th>Cross-listed</th></tr>
-        <tr><td>CS101</td><td>3</td><td></td><td></td></tr>
-        <tr><td>CS102</td><td>3</td><td>CS101</td><td></td></tr>
-        <tr><td>MATH101</td><td>3</td><td></td><td>STAT101</td></tr>
+        <tr>
+            <th>Course Code</th>
+            <th>Title</th>
+            <th>Credits</th>
+            <th>Prerequisites</th>
+            <th>Cross-listed</th>
+        </tr>
+        <tr><td>CS101</td><td>Intro</td><td>3</td><td></td><td></td></tr>
+        <tr><td>CS102</td><td>Advanced</td><td>3</td><td>CS101</td><td></td></tr>
+        <tr><td>MATH101</td><td>Math</td><td>3</td><td></td><td>STAT101</td></tr>
     </table>
     """
     client.post(
