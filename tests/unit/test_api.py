@@ -1,6 +1,6 @@
 import pytest
 import io
-from main import normalize_course, get_grade_weight, term_sort_key
+from main import normalize_course, get_grade_weight, term_sort_key, students_db
 
 # --- UNIT TESTS (Logic) ---
 
@@ -41,18 +41,34 @@ def test_catalog_import(client):
 
 
 def test_student_history_and_audit(client):
-    # 1. Setup Catalog
-    html_cat = b"""<table><tr><th>Course Code</th><th>Credits</th></tr><tr><td>CS101</td><td>3</td></tr></table>"""
+    # INITIALIZE STUDENT TO PREVENT 404 ERRORS
+    students_db["STUDENT1"] = {"history": [], "plan": []}
+
+    # 1. Setup Catalog (MUST include Prereqs and Cross-listed columns)
+    html_cat = b"""
+    <table>
+        <tr><th>Course Code</th><th>Credits</th><th>Prerequisites</th><th>Cross-listed</th></tr>
+        <tr><td>CS101</td><td>3</td><td></td><td></td></tr>
+        <tr><td>CS102</td><td>3</td><td>CS101</td><td></td></tr>
+        <tr><td>MATH101</td><td>3</td><td></td><td>STAT101</td></tr>
+    </table>
+    """
     client.post(
         "/api/v1/admin/catalog/import",
         files={"file": ("cat.html", io.BytesIO(html_cat), "text/html")},
     )
 
-    # 2. Add History
+    # 2. Add History (Take MATH101 so we can trigger a conflict later)
     payload = {
         "history": [
             {
                 "course_code": "CS101",
+                "term": "24F",
+                "credits_earned": 3,
+                "status": "Completed",
+            },
+            {
+                "course_code": "MATH101",
                 "term": "24F",
                 "credits_earned": 3,
                 "status": "Completed",
@@ -61,10 +77,12 @@ def test_student_history_and_audit(client):
     }
     client.put("/api/v1/students/STUDENT1/history", json=payload)
 
-    # 3. Add Plan
+    # 3. Add Plan (Deliberately trigger all 3 error types for coverage)
     plan_payload = {
         "planned_courses": [
-            {"course_code": "CS101", "term": "25SP"}  # Should trigger duplicate error
+            {"course_code": "CS101", "term": "25SP"},  # Triggers DUPLICATE
+            {"course_code": "CS102", "term": "24F"},   # Triggers PREREQUISITE (taking same term as prereq)
+            {"course_code": "STAT101", "term": "25SP"} # Triggers CROSS-LIST (already took MATH101)
         ]
     }
     client.post("/api/v1/students/STUDENT1/plan", json=plan_payload)
@@ -72,9 +90,13 @@ def test_student_history_and_audit(client):
     # 4. Audit
     response = client.get("/api/v1/students/STUDENT1/audit-report")
     assert response.status_code == 200
+    
     data = response.json()
-    assert data["status"] == "warning"  # Should trigger warning due to duplicate course
-    assert data["credit_summary"]["total_earned"] == 3
+    assert data["status"] == "warning"
+    assert data["credit_summary"]["total_earned"] == 6 # 3 for CS101 + 3 for MATH101
+    assert len(data["cross_list_violations"]) == 1
+    assert data["cross_list_violations"][0]["type"] == "CROSS_LIST_CONFLICT"
+    assert len(data["timeline_validation"]) > 0
 
 
 def test_audit_missing_student(client):

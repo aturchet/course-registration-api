@@ -1,6 +1,6 @@
 import pytest
 import io
-
+from main import students_db
 
 def test_full_academic_lifecycle(client):
     """
@@ -10,6 +10,9 @@ def test_full_academic_lifecycle(client):
     -Add Plan
     -Audit for Graduation Progress
     """
+    # 0. INITIALIZE STUDENT TO PREVENT 404
+    student_id = "STU_99"
+    students_db[student_id] = {"history": [], "plan": []}
 
     # 1. Setup: Import Catalog
     catalog_html = b"""
@@ -26,7 +29,6 @@ def test_full_academic_lifecycle(client):
     assert response_cat.status_code == 201
 
     # 2. Setup: Import Student History
-    student_id = "STU_99"
     history_payload = {
         "history": [
             {
@@ -37,6 +39,7 @@ def test_full_academic_lifecycle(client):
             }
         ]
     }
+    # This will now return 200 instead of 404
     client.put(f"/api/v1/students/{student_id}/history", json=history_payload)
 
     # 3. Action: Add Planned Course (Dependent on CS101)
@@ -57,6 +60,9 @@ def test_full_academic_lifecycle(client):
 
 def test_integration_missing_prerequisite(client):
     """Verifies that the audit correctly flags a missing prerequisite."""
+    # INITIALIZE STUDENT TO PREVENT 404
+    students_db["S1"] = {"history": [], "plan": []}
+
     # Setup Catalog
     catalog_html = b"""
     <table>
@@ -78,6 +84,7 @@ def test_integration_missing_prerequisite(client):
 
     # Audit
     audit_resp = client.get("/api/v1/students/S1/audit-report")
+    assert audit_resp.status_code == 200
     data = audit_resp.json()
 
     # Check for the specific error type
