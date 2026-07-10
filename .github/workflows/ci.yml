@@ -1,5 +1,8 @@
 name: Backend CI/CD Quality Gate
 
+env:
+    PYTHONPATH: ${{ github.workspace }}
+
 on:
   push:
     branches: [ "main" ]
