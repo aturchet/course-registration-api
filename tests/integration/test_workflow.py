@@ -2,6 +2,7 @@ import pytest
 import io
 from main import students_db
 
+
 def test_full_academic_lifecycle(client):
     """
     Test integration flow:

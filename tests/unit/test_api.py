@@ -72,7 +72,7 @@ def test_student_history_and_audit(client):
                 "term": "24F",
                 "credits_earned": 3,
                 "status": "Completed",
-            }
+            },
         ]
     }
     client.put("/api/v1/students/STUDENT1/history", json=payload)
@@ -81,8 +81,14 @@ def test_student_history_and_audit(client):
     plan_payload = {
         "planned_courses": [
             {"course_code": "CS101", "term": "25SP"},  # Triggers DUPLICATE
-            {"course_code": "CS102", "term": "24F"},   # Triggers PREREQUISITE (taking same term as prereq)
-            {"course_code": "STAT101", "term": "25SP"} # Triggers CROSS-LIST (already took MATH101)
+            {
+                "course_code": "CS102",
+                "term": "24F",
+            },  # Triggers PREREQUISITE (taking same term as prereq)
+            {
+                "course_code": "STAT101",
+                "term": "25SP",
+            },  # Triggers CROSS-LIST (already took MATH101)
         ]
     }
     client.post("/api/v1/students/STUDENT1/plan", json=plan_payload)
@@ -90,10 +96,10 @@ def test_student_history_and_audit(client):
     # 4. Audit
     response = client.get("/api/v1/students/STUDENT1/audit-report")
     assert response.status_code == 200
-    
+
     data = response.json()
     assert data["status"] == "warning"
-    assert data["credit_summary"]["total_earned"] == 6 # 3 for CS101 + 3 for MATH101
+    assert data["credit_summary"]["total_earned"] == 6  # 3 for CS101 + 3 for MATH101
     assert len(data["cross_list_violations"]) == 1
     assert data["cross_list_violations"][0]["type"] == "CROSS_LIST_CONFLICT"
     assert len(data["timeline_validation"]) > 0
