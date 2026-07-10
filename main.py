@@ -441,20 +441,9 @@ async def generate_audit_report(student_id: str, strict: bool = False):
     for record in plan:
         course_code = normalize_course(record["course_code"])
         term_planned = record["term"]
-        original_code = record[
-            "course_code"
-        ]  # Preserve original casing/hyphens for output
+        original_code = record["course_code"]  # Preserve casing/hyphens for output
 
-        # Deduplication/Retake Check
-        if course_code in completed_terms:
-            add_timeline_error(
-                term=term_planned,
-                code=original_code,
-                err_type="DUPLICATE_COURSE",
-                msg="Course is already completed.",
-            )
-            continue
-
+        # 1. Check if course exists in catalog FIRST
         catalog_entry = catalog_db.get(course_code)
         if not catalog_entry:
             add_timeline_error(
@@ -464,8 +453,21 @@ async def generate_audit_report(student_id: str, strict: bool = False):
                 msg="Course is unknown in catalog.",
             )
             continue
+            
+        # 2. Add credits before checks
+        total_planned += catalog_entry.get("credits", 0)
 
-        # Cross-listing Check
+        # 3. Deduplication/Retake Check
+        if course_code in completed_terms:
+            add_timeline_error(
+                term=term_planned,
+                code=original_code,
+                err_type="DUPLICATE_COURSE",
+                msg="Course is already completed.",
+            )
+            continue
+
+        # 4. Cross-listing Check
         cross_listed_with = normalize_course(catalog_entry.get("cross_listed", ""))
         if cross_listed_with and cross_listed_with in completed_terms:
             original_cross = catalog_entry.get("cross_listed", cross_listed_with)
