@@ -499,7 +499,6 @@ async def generate_audit_report(student_id: str, strict: bool = False):
                 msg=f"Missing prerequisite: {', '.join(missing_reqs)}",
             )
 
-        total_planned += catalog_entry.get("credits", 0)
         completed_terms[course_code] = term_planned
 
     # determine path to graduation
